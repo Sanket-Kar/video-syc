@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>YouTube Sync</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            background-color: #f0f0f0;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+
+        #app {
+            width: 90%;
+            max-width: 800px;
+            background-color: #fff;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+        }
+
+        #video-container {
+            position: relative;
+            padding-bottom: 56.25%; /* 16:9 */
+            height: 0;
+        }
+
+        #player {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+
+        #local-video, #local-video-controls {
+            display: none;
+        }
+
+        #local-video {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+
+        #controls {
+            padding: 20px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        input[type="text"] {
+            flex: 1;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+
+        button {
+            padding: 10px 15px;
+            border: none;
+            background-color: #007bff;
+            color: #fff;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background-color: #0056b3;
+        }
+
+        #player-toggle {
+            padding: 10px 20px;
+            background-color: #f0f0f0;
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <div id="video-container">
+            <div id="player"></div>
+            <video id="local-video" controls></video>
+        </div>
+        <div id="controls">
+            <div id="youtube-controls">
+                <input type="text" id="video-id" placeholder="Enter YouTube Video ID">
+            </div>
+            <div id="local-video-controls">
+                <input type="file" id="video-file">
+            </div>
+            <div id="room-controls">
+                <button id="create-room">Create Room</button>
+                <input type="text" id="room-id" placeholder="Enter Room ID">
+                <button id="join-room">Join Room</button>
+            </div>
+        </div>
+        <div id="player-toggle">
+            <button id="use-youtube">Use YouTube</button>
+            <button id="use-local">Use Local Video</button>
+        </div>
+    </div>
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+    <script src="https://www.youtube.com/iframe_api"></script>
+    <script>
+        const socket = io('https://your-glitch-project-name.glitch.me'); // Replace with your Glitch project URL
+        let player;
+        let localPlayer = document.getElementById('local-video');
+        let isHost = false;
+        let roomId = null;
+        let playerType = 'youtube'; // 'youtube' or 'local'
+
+        const videoIdInput = document.getElementById('video-id');
+        const createRoomBtn = document.getElementById('create-room');
+        const roomIdInput = document.getElementById('room-id');
+        const joinRoomBtn = document.getElementById('join-room');
+        const videoFileInput = document.getElementById('video-file');
+        const useYoutubeBtn = document.getElementById('use-youtube');
+        const useLocalBtn = document.getElementById('use-local');
+        const youtubeControls = document.getElementById('youtube-controls');
+        const localVideoControls = document.getElementById('local-video-controls');
+        const youtubePlayer = document.getElementById('player');
+
+        function onYouTubeIframeAPIReady() {
+            player = new YT.Player('player', {
+                height: '390',
+                width: '640',
+                videoId: 'M7lc1UVf-VE', // Default video
+                events: {
+                    'onReady': onPlayerReady,
+                    'onStateChange': onPlayerStateChange
+                }
+            });
+        }
+
+        function onPlayerReady(event) {
+            // Player is ready
+        }
+
+        function onPlayerStateChange(event) {
+            if (isHost && playerType === 'youtube') {
+                socket.emit('player-event', {
+                    room: roomId,
+                    event: {
+                        type: 'stateChange',
+                        player: 'youtube',
+                        data: event.data
+                    }
+                });
+            }
+        }
+
+        useYoutubeBtn.addEventListener('click', () => {
+            playerType = 'youtube';
+            youtubeControls.style.display = 'block';
+            localVideoControls.style.display = 'none';
+            youtubePlayer.style.display = 'block';
+            localPlayer.style.display = 'none';
+        });
+
+        useLocalBtn.addEventListener('click', () => {
+            playerType = 'local';
+            youtubeControls.style.display = 'none';
+            localVideoControls.style.display = 'block';
+            youtubePlayer.style.display = 'none';
+            localPlayer.style.display = 'block';
+        });
+
+        createRoomBtn.addEventListener('click', () => {
+            isHost = true;
+            roomId = Math.random().toString(36).substring(7);
+            const videoId = videoIdInput.value;
+            socket.emit('create', { room: roomId, videoId: videoId, playerType: playerType });
+            roomIdInput.value = roomId;
+            if (playerType === 'youtube' && videoId) {
+                player.loadVideoById(videoId);
+            }
+        });
+
+        joinRoomBtn.addEventListener('click', () => {
+            isHost = false;
+            roomId = roomIdInput.value;
+            socket.emit('join', roomId);
+        });
+
+        videoFileInput.addEventListener('change', (event) => {
+            const file = event.target.files[0];
+            if (file) {
+                const fileURL = URL.createObjectURL(file);
+                localPlayer.src = fileURL;
+            }
+        });
+
+        localPlayer.addEventListener('play', () => {
+            if (isHost) {
+                socket.emit('player-event', {
+                    room: roomId,
+                    event: {
+                        type: 'stateChange',
+                        player: 'local',
+                        data: 'play'
+                    }
+                });
+            }
+        });
+
+        localPlayer.addEventListener('pause', () => {
+            if (isHost) {
+                socket.emit('player-event', {
+                    room: roomId,
+                    event: {
+                        type: 'stateChange',
+                        player: 'local',
+                        data: 'pause'
+                    }
+                });
+            }
+        });
+
+        localPlayer.addEventListener('seeked', () => {
+            if (isHost) {
+                socket.emit('player-event', {
+                    room: roomId,
+                    event: {
+                        type: 'seek',
+                        player: 'local',
+                        data: localPlayer.currentTime
+                    }
+                });
+            }
+        });
+
+        socket.on('room-info', (data) => {
+            playerType = data.playerType;
+            if (playerType === 'youtube') {
+                youtubeControls.style.display = 'block';
+                localVideoControls.style.display = 'none';
+                youtubePlayer.style.display = 'block';
+                localPlayer.style.display = 'none';
+                player.loadVideoById(data.videoId);
+            } else {
+                youtubeControls.style.display = 'none';
+                localVideoControls.style.display = 'block';
+                youtubePlayer.style.display = 'none';
+                localPlayer.style.display = 'block';
+            }
+        });
+
+        socket.on('get-sync', () => {
+            if (isHost) {
+                let event;
+                if (playerType === 'youtube') {
+                    event = {
+                        type: 'sync',
+                        player: 'youtube',
+                        data: {
+                            state: player.getPlayerState(),
+                            time: player.getCurrentTime()
+                        }
+                    };
+                } else {
+                    event = {
+                        type: 'sync',
+                        player: 'local',
+                        data: {
+                            state: localPlayer.paused ? 'paused' : 'playing',
+                            time: localPlayer.currentTime
+                        }
+                    };
+                }
+                socket.emit('sync', { room: roomId, event: event });
+            }
+        });
+
+        socket.on('sync', (event) => {
+            if (!isHost) {
+                if (event.player === 'youtube') {
+                    player.seekTo(event.data.time, true);
+                    if (event.data.state === YT.PlayerState.PLAYING) {
+                        player.playVideo();
+                    } else if (event.data.state === YT.PlayerState.PAUSED) {
+                        player.pauseVideo();
+                    }
+                } else if (event.player === 'local') {
+                    localPlayer.currentTime = event.data.time;
+.                    if (event.data.state === 'playing') {
+                        localPlayer.play();
+                    } else if (event.data.state === 'paused') {
+                        localPlayer.pause();
+                    }
+                }
+            }
+        });
+
+        socket.on('player-event', (event) => {
+            if (!isHost) {
+                if (event.player === 'youtube') {
+                    switch (event.type) {
+                        case 'stateChange':
+                            if (event.data === YT.PlayerState.PLAYING) {
+                                player.playVideo();
+                            } else if (event.data === YT.PlayerState.PAUSED) {
+                                player.pauseVideo();
+                            }
+                            break;
+                        case 'seek':
+                            player.seekTo(event.data, true);
+                            break;
+                    }
+                } else if (event.player === 'local') {
+                    switch (event.type) {
+                        case 'stateChange':
+                            if (event.data === 'play') {
+                                localPlayer.play();
+                            } else if (event.data === 'pause') {
+                                localPlayer.pause();
+                            }
+                            break;
+                        case 'seek':
+                            localPlayer.currentTime = event.data;
+                            break;
+                    }
+                }
+            }
+        });
+    </script>
+</body>
+</html>
